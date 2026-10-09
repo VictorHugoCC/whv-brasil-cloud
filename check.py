@@ -20,6 +20,8 @@ STATE = Path(__file__).with_name("state.json")
 TOPIC = os.environ["NTFY_TOPIC"]  # vem do secret do repositório, não fica no código
 UA = "Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0"
 MAX_ERRORS = 6  # ~30 min falhando seguido → avisa que o monitor está cego
+NAG_EVERY = 2  # com a cota aberta, repete o push a cada 2 rodadas (~10 min)...
+MAX_NAGS = 12  # ...até 12 vezes (~2 h) — na nuvem não tem como dar "ok", então para sozinho
 
 
 def push(title, body, priority="default", click=URL):
@@ -52,6 +54,7 @@ def fetch_status():
 
 def main():
     state = json.loads(STATE.read_text()) if STATE.exists() else {"status": None, "errors": 0}
+    state.setdefault("open_runs", 0)
     old = state["status"]
 
     try:
@@ -73,6 +76,7 @@ def main():
     if status != old:
         state["status"] = status
         if "open" in status:
+            state["open_runs"] = 0
             push("🇦🇺 COTA DO BRASIL ABERTA!",
                  "Work and Holiday 462 reabriu. Aplica AGORA na ImmiAccount — costuma esgotar em horas.",
                  "urgent", "https://online.immi.gov.au/lusc/login")
@@ -80,6 +84,13 @@ def main():
             push("WHV Austrália: status mudou", f"Brasil: {old} → {status}")
         else:
             push("☁️ Monitor WHV na nuvem ligado", f"Primeira leitura ok. Brasil: {status}")
+    elif "open" in status and state["open_runs"] < NAG_EVERY * MAX_NAGS:
+        # continua aberta: insiste, porque um push só pode passar batido dormindo
+        state["open_runs"] += 1
+        if state["open_runs"] % NAG_EVERY == 0:
+            push("🇦🇺 COTA DO BRASIL CONTINUA ABERTA",
+                 f"Aberta há ~{state['open_runs'] * 5} min. Aplica na ImmiAccount!",
+                 "urgent", "https://online.immi.gov.au/lusc/login")
 
     STATE.write_text(json.dumps(state, ensure_ascii=False) + "\n")
 
